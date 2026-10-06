@@ -5,3 +5,4 @@ data/
 .env
 docs/
 .idea/
+.DS_Store

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Usage Analytics · TRS Converter</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar wide">
+    <a href="/">← Converter</a>
+    <nav>
+        <span>{{ user.username }}</span>
+        <form method="post" action="/logout"><button type="submit" class="link-btn">Sign out</button></form>
+    </nav>
+</header>
+
+<main>
+<div class="card wide">
+    <h1>Usage analytics</h1>
+    <p class="range">
+        {% for d in [1, 7, 30, 90] %}
+        <a href="?days={{ d }}" class="{{ 'active' if stats.days == d }}">{{ 'Today' if d == 1 else 'Last ' ~ d ~ ' days' }}</a>
+        {% endfor %}
+    </p>
+
+    <div class="stats">
+        <div class="stat"><div class="value">{{ stats.conversions }}</div><div class="name">Successful conversions</div></div>
+        <div class="stat"><div class="value">{{ stats.failures }}</div><div class="name">Failed conversions</div></div>
+        <div class="stat"><div class="value">{{ stats.success_rate if stats.success_rate is not none else '–' }}{{ '%' if stats.success_rate is not none }}</div><div class="name">Success rate</div></div>
+        <div class="stat"><div class="value">{{ stats.counts.get('jpeg_downloaded', 0) }}</div><div class="name">Downloads</div></div>
+        <div class="stat"><div class="value">{{ stats.counts.get('login_succeeded', 0) }}</div><div class="name">Sign-ins</div></div>
+        <div class="stat"><div class="value">{{ stats.counts.get('login_failed', 0) + stats.counts.get('login_locked', 0) }}</div><div class="name">Failed sign-ins</div></div>
+    </div>
+
+    <h2>Conversions per day</h2>
+    {% set max_daily = (stats.daily | map(attribute='conversions') | max) if stats.daily else 0 %}
+    {% if stats.daily %}
+    <div class="table-wrap"><table>
+        <thead><tr><th>Day (UTC)</th><th class="num">Succeeded</th><th class="num">Failed</th><th class="bar-cell"></th></tr></thead>
+        <tbody>
+        {% for row in stats.daily %}
+        <tr>
+            <td>{{ row.day }}</td>
+            <td class="num">{{ row.conversions }}</td>
+            <td class="num">{{ row.failures }}</td>
+            <td class="bar-cell"><div class="bar" style="width: {{ (100 * row.conversions / max_daily) if max_daily else 0 }}%"></div></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<p class="muted">No activity in this period.</p>{% endif %}
+
+    <h2>By user</h2>
+    {% if stats.per_user %}
+    <div class="table-wrap"><table>
+        <thead><tr><th>User</th><th class="num">Conversions</th><th class="num">Failures</th><th class="num">Downloads</th><th>Last seen (UTC)</th></tr></thead>
+        <tbody>
+        {% for row in stats.per_user %}
+        <tr>
+            <td>{{ row.username }}</td>
+            <td class="num">{{ row.conversions }}</td>
+            <td class="num">{{ row.failures }}</td>
+            <td class="num">{{ row.downloads }}</td>
+            <td>{{ row.last_seen | replace('T', ' ') | replace('+00:00', '') }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+    {% else %}<p class="muted">No activity in this period.</p>{% endif %}
+
+    <h2>All events</h2>
+    <div class="table-wrap"><table>
+        <thead><tr><th>Event</th><th class="num">Count</th></tr></thead>
+        <tbody>
+        {% for event, n in stats.counts.items() %}
+        <tr><td>{{ event }}</td><td class="num">{{ n }}</td></tr>
+        {% else %}
+        <tr><td colspan="2" class="muted">No events yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+
+    <h2>Recent activity</h2>
+    <div class="table-wrap"><table>
+        <thead><tr><th>Time (UTC)</th><th>User</th><th>Event</th><th>Details</th></tr></thead>
+        <tbody>
+        {% for row in stats.recent %}
+        <tr>
+            <td>{{ row.ts | replace('T', ' ') | replace('+00:00', '') }}</td>
+            <td>{{ row.username or '–' }}</td>
+            <td>{{ row.event }}</td>
+            <td class="details">{{ row.details or '' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="muted">No events yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table></div>
+</div>
+</main>
+</body>
+</html>

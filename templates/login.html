@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in · TRS Converter</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<main>
+    <div class="card">
+        <h1>Safe Electric TRS Converter</h1>
+        <p class="lead">Sign in to convert Test Record Sheets to JPEG.</p>
+
+        <form method="post" action="/login">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" value="{{ username }}"
+                   autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus>
+
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+            {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+
+            <button type="submit" class="btn">Sign in</button>
+        </form>
+    </div>
+</main>
+</body>
+</html>

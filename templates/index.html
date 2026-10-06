@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRS Converter</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+    <span>Signed in as <strong>{{ user.username }}</strong></span>
+    <nav>
+        {% if user.role == "admin" %}<a href="/admin/analytics">Analytics</a>{% endif %}
+        <form method="post" action="/logout"><button type="submit" class="link-btn">Sign out</button></form>
+    </nav>
+</header>
+
+<main>
+<div class="card">
+    <h1>Safe Electric TRS Converter</h1>
+    <p class="lead">
+        Choose a completed Test Record Sheet (<code>.xlsx</code> or <code>.xls</code>, up to {{ max_upload_mb }} MB).
+        It will be turned into a 300 DPI JPEG that downloads to this device.
+    </p>
+
+    <!-- Step 1: choose a file -->
+    <section id="pickStep">
+        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-describedby="dropHint">
+            <div class="icon" aria-hidden="true">📊</div>
+            <div><strong>Tap to choose a file</strong> or drag &amp; drop</div>
+            <div class="hint" id="dropHint">Excel workbook, first page is converted</div>
+            <div class="file-name" id="fileName"></div>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden>
+        <button type="button" id="convertBtn" class="btn" disabled>Convert to JPEG</button>
+    </section>
+
+    <!-- Step 2: progress -->
+    <section id="progressStep" class="progress" hidden aria-live="polite">
+        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressTrack">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-label">
+            <span id="progressMessage">Uploading...</span>
+            <span id="progressPercent">0%</span>
+        </div>
+    </section>
+
+    <!-- Step 3: result -->
+    <section id="resultStep" hidden>
+        <div class="alert success" role="status">✅ <strong>Your JPEG is ready</strong> and downloading.</div>
+        <div class="preview"><img id="previewImg" alt="Preview of the converted Test Record Sheet"></div>
+        <a id="downloadLink" class="btn" href="#">Download JPEG again</a>
+        <button type="button" id="anotherBtn" class="btn secondary">Convert another file</button>
+    </section>
+
+    <div id="errorBox" class="alert error" role="alert" hidden></div>
+</div>
+</main>
+
+<script>
+(() => {
+    const MAX_BYTES = {{ max_upload_mb }} * 1024 * 1024;
+    const ALLOWED = [".xlsx", ".xls"];
+    const $ = (id) => document.getElementById(id);
+
+    const fileInput = $("fileInput"), dropzone = $("dropzone"), convertBtn = $("convertBtn");
+    const pickStep = $("pickStep"), progressStep = $("progressStep"), resultStep = $("resultStep");
+    const errorBox = $("errorBox");
+    let selectedFile = null;
+
+    function track(event, details = {}) {
+        // Analytics must never get in the way of the user, so failures are ignored.
+        fetch("/api/events", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({event, details}),
+            keepalive: true,
+        }).catch(() => {});
+    }
+
+    function showError(message) {
+        errorBox.textContent = message;
+        errorBox.hidden = false;
+    }
+
+    function clearError() {
+        errorBox.hidden = true;
+        errorBox.textContent = "";
+    }
+
+    function setProgress(percent, message) {
+        percent = Math.max(0, Math.min(100, Math.round(percent)));
+        $("progressBar").style.width = percent + "%";
+        $("progressTrack").setAttribute("aria-valuenow", percent);
+        $("progressPercent").textContent = percent + "%";
+        if (message) $("progressMessage").textContent = message;
+    }
+
+    function validate(file) {
+        const name = file.name.toLowerCase();
+        if (!ALLOWED.some((ext) => name.endsWith(ext))) return "Only Excel files (.xlsx or .xls) are supported.";
+        if (file.size === 0) return "The selected file is empty.";
+        if (file.size > MAX_BYTES) return `The file is larger than {{ max_upload_mb }} MB.`;
+        return null;
+    }
+
+    function selectFile(file) {
+        clearError();
+        const problem = validate(file);
+        if (problem) {
+            selectedFile = null;
+            convertBtn.disabled = true;
+            dropzone.classList.remove("has-file");
+            $("fileName").textContent = "";
+            showError(problem);
+            track("file_rejected", {reason: problem});
+            return;
+        }
+        selectedFile = file;
+        $("fileName").textContent = file.name;
+        dropzone.classList.add("has-file");
+        convertBtn.disabled = false;
+        track("file_selected", {size_kb: Math.round(file.size / 1024)});
+    }
+
+    function reset() {
+        selectedFile = null;
+        fileInput.value = "";
+        $("fileName").textContent = "";
+        dropzone.classList.remove("has-file");
+        convertBtn.disabled = true;
+        convertBtn.textContent = "Convert to JPEG";
+        setProgress(0, "Uploading...");
+        pickStep.hidden = false;
+        progressStep.hidden = true;
+        resultStep.hidden = true;
+        clearError();
+    }
+
+    // Upload with XMLHttpRequest so we can report upload progress (fetch can't).
+    function upload(file) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            const form = new FormData();
+            form.append("file", file);
+            xhr.open("POST", "/api/convert");
+            xhr.responseType = "json";
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) setProgress((e.loaded / e.total) * 15, "Uploading...");
+            };
+            xhr.onload = () => {
+                const body = xhr.response || {};
+                if (xhr.status === 401) return reject(new Error("Your session has expired. Please refresh the page and sign in."));
+                if (xhr.status >= 200 && xhr.status < 300 && body.job_id) return resolve(body.job_id);
+                reject(new Error(body.error || `Upload failed (HTTP ${xhr.status}).`));
+            };
+            xhr.onerror = () => reject(new Error("Network error. Check your connection and try again."));
+            xhr.ontimeout = () => reject(new Error("The upload timed out. Please try again."));
+            xhr.timeout = 5 * 60 * 1000;
+            xhr.send(form);
+        });
+    }
+
+    async function waitForJob(jobId) {
+        const started = Date.now();
+        let networkFailures = 0;
+        while (Date.now() - started < 5 * 60 * 1000) {
+            await new Promise((r) => setTimeout(r, 800));
+            let res;
+            try {
+                res = await fetch(`/api/jobs/${jobId}`, {cache: "no-store"});
+            } catch {
+                if (++networkFailures >= 5) throw new Error("Lost connection to the server. Please try again.");
+                continue;
+            }
+            networkFailures = 0;
+            const job = await res.json().catch(() => ({}));
+            if (res.status === 401) throw new Error("Your session has expired. Please refresh the page and sign in.");
+            if (!res.ok) throw new Error(job.error || `Server error (HTTP ${res.status}).`);
+            // Server progress covers 15-100% of the bar; uploading was 0-15%.
+            setProgress(15 + job.progress * 0.85, job.message);
+            if (job.status === "done") return job;
+            if (job.status === "error") throw new Error(job.error || "Conversion failed.");
+        }
+        throw new Error("The conversion is taking too long. Please try again.");
+    }
+
+    function triggerDownload(url) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    async function convert() {
+        if (!selectedFile) return;
+        clearError();
+        convertBtn.disabled = true;
+        convertBtn.textContent = "Converting...";
+        progressStep.hidden = false;
+        setProgress(0, "Uploading...");
+
+        try {
+            const jobId = await upload(selectedFile);
+            setProgress(15, "Uploaded. Waiting for the converter...");
+            const job = await waitForJob(jobId);
+
+            const imageUrl = `/api/jobs/${jobId}/jpeg`;
+            const downloadUrl = `${imageUrl}?download=true`;
+            $("previewImg").src = imageUrl;
+            $("downloadLink").href = downloadUrl;
+            $("downloadLink").setAttribute("download", job.jpeg_name || "TRS.jpg");
+
+            pickStep.hidden = true;
+            progressStep.hidden = true;
+            resultStep.hidden = false;
+            triggerDownload(downloadUrl);
+        } catch (err) {
+            showError(err.message);
+            convertBtn.disabled = false;
+            convertBtn.textContent = "Try again";
+        }
+    }
+
+    dropzone.addEventListener("click", () => fileInput.click());
+    dropzone.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+    });
+    fileInput.addEventListener("change", () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
+    ["dragenter", "dragover"].forEach((type) => dropzone.addEventListener(type, (e) => {
+        e.preventDefault();
+        dropzone.classList.add("dragover");
+    }));
+    ["dragleave", "drop"].forEach((type) => dropzone.addEventListener(type, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+    }));
+    dropzone.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]); });
+    convertBtn.addEventListener("click", convert);
+    $("anotherBtn").addEventListener("click", () => { track("convert_another"); reset(); });
+
+    track("page_view");
+})();
+</script>
+</body>
+</html>

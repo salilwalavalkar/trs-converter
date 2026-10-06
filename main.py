@@ -82,14 +82,22 @@ async def login(request: Request, username: str = Form(""), password: str = Form
             request, "login.html", {"error": message, "username": username}, status_code=status
         )
 
+    def track_failure(event: str):
+        # Only attribute attempts to real accounts, so made-up usernames
+        # don't show up as users on the analytics dashboard.
+        if username in auth.USERS:
+            analytics.track(event, username)
+        else:
+            analytics.track(event, None, unknown_user=True)
+
     if auth.throttle.is_locked(throttle_key):
-        analytics.track("login_locked", username or None)
+        track_failure("login_locked")
         return fail("Too many failed attempts. Please wait 15 minutes and try again.", 429)
 
     user = auth.authenticate(username, password)
     if user is None:
         auth.throttle.record_failure(throttle_key)
-        analytics.track("login_failed", username or None)
+        track_failure("login_failed")
         return fail("Incorrect username or password.", 401)
 
     auth.throttle.reset(throttle_key)

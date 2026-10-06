@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: trs-converter
+    runtime: docker
+    plan: free
+    branch: main
+    healthCheckPath: /healthz
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APP_USERS
+        sync: false

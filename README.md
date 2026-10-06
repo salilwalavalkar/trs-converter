@@ -1,8 +1,6 @@
 # trs-converter
 
-TRS Converter for SJOS — a small web app for Safe Electric that turns a completed
-**Test Record Sheet (TRS)** Excel workbook into a high-resolution JPEG and downloads it
-to the user's device.
+TRS Converter - A small web app to convert xls file to jpeg
 
 **Live:** https://trs-converter.onrender.com (sign-in required)
 
